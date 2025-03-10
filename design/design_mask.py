@@ -10,6 +10,7 @@ from samplemaker.devices import CreateDeviceLibrary, Device
 import samplemaker.devices as smdev
 from samplemaker.layout import GeomGroup
 import numpy as np
+import samplemaker.makers as sm
 
 # themask = smlay.Mask("QPLIB_ELE_PCWG_single")
 themask = smlay.Mask("QPLIB_ELE_PCWG_table")
@@ -190,6 +191,44 @@ class GratingCouplerLossDevice(Device):
         self._seq.reset()
         self._seq.seq = seq
         g = self._seq.run()
+        return g
+
+class AvalancheDevice(Device):
+    def initialize(self):
+        self.set_name("AVALANCHE_DEVICE")
+        self.set_description("Device for testing avalanche breakdown regime")
+
+    def parameters(self):
+        self.addparameter("width", 100, "Width of the contact",float)
+        self.addparameter("height", 100, "Height of the contact",float)
+        self.addparameter("corner_radius", 10, "Rounded corners",float)
+        self.addparameter("contact_distance", 3, "Distance between contacts",float)
+        self.addparameter("trenchW", 1.5, "width of deep trench around contacts")
+        self.addparameter("port_height", 2, "Height of connecting piece between contacts")
+        self.addparameter("port_width", 3, "Width of connecting piece between contacts")
+        self.addparameter("trench_distance", 2, "Distance between deep trench and contacts")
+
+    
+    def geom(self):
+        p = self.get_params()
+        contact = sm.make_rounded_rect(0, 0, p["width"], p["height"], p["corner_radius"], layer=ElectricalConnectorOptions["NType_metal_layer"])
+        contact += sm.make_rect(p["width"] / 2, 0, p["port_width"], p["port_height"], layer=ElectricalConnectorOptions["NType_metal_layer"], numkey=4)
+        contact += contact.copy().mirrorX(p["width"] / 2 + p["port_width"]).translate(p["contact_distance"], 0)
+        shell = contact.copy()
+        shell.poly_outlining(p["trenchW"], ElectricalConnectorOptions["NType_metal_layer"], p["trench_distance"])
+        shell.set_layer(7)
+
+        g = contact + shell
+        g.translate(-g.bounding_box().cx(), 0)
+
+        device_width = 2 * (p["trenchW"] + p["trench_distance"] + p["width"] + p["contact_distance"])
+        device_height = p["height"] + 2 * (p["trenchW"] + p["trench_distance"])
+
+        boolean_mask = sm.make_rect(0, 0, p["contact_distance"], p["port_height"] + 2 * p["trench_distance"], layer=3)
+        shallow_etch = sm.make_rounded_rect(0, 0, 1.2 * device_width, 1.2 * device_height, p["corner_radius"], layer=3)
+
+        shallow_etch.boolean_difference(boolean_mask, 3, 3)
+        g += shallow_etch
         return g
 
 ## bbs 12.582500000500001, 25.082500000499998, 35.082500000500005, 55.08250000050001, 75.0825000005
