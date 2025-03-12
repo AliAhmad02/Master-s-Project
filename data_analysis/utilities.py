@@ -159,14 +159,24 @@ class FKFit:
         eta: float,
         alpha_0: float,
     ) -> float:
+        # func = (
+        #     lambda alpha: FK_fit(
+        #         lam,
+        #         self.x,
+        #         self.T,
+        #         V_app + power * eta * R * (1 - np.exp(-alpha * self.L)),
+        #     )
+        #     + alpha_0
+        #     - alpha
+        # )
         func = (
             lambda alpha: FK_fit(
                 lam,
                 self.x,
                 self.T,
-                V_app + power * eta * R * (1 - np.exp(-alpha * self.L)),
+                # Responsivity = eta * lam(mu m) / 1.24
+                V_app + power * eta / 1.24 * (lam / 1000) * R * (1 - np.exp(-alpha * self.L)),
             )
-            + alpha_0
             - alpha
         )
         if len(self.alphas) == 0:
@@ -174,7 +184,7 @@ class FKFit:
         else:
             alpha = fsolve(func, self.alphas[-1])[0]
         self.alphas.append(alpha)
-        P_out = power * np.exp(-self.L * alpha)
+        P_out = power * np.exp(-self.L * (0.44 * alpha + alpha_0))
         return float(P_out)
 
     # def FK_fit_power_unscaled(
