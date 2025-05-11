@@ -7,16 +7,53 @@ from dataclasses import dataclass
 from typing import Callable
 import inspect
 from iminuit import Minuit
-from iminuit.cost import LeastSquares
+from iminuit.cost import LeastSquares, BinnedNLL, UnbinnedNLL
 from scipy.stats import chi2
 
 FIGDIR = os.path.join(os.path.dirname(__file__), "figures")
 
 
-def savefig(nb_name: str, fig_name: str, fig: Figure, tight=True):
+def num_err_to_latex_str(number: float, err: float) -> str:
+    """Take a large/small number (including its error) that should be written
+    in scientific notation and format it as a latex-string.
+
+    For example, 3.55e+7±0.05e+7 will be written as $(3.55±0.05)\times 10^{7}$.
+
+    We do not use powers of 10 if abs(power) is 2 and below.
+
+    Args:
+        number: Number to be formatted.
+        err: The error on the number.
+        n_decimals: Number of decimals to format the number/error with.
+
+    Return:
+        latex_string: The formatted latex-string.
+    """
+    power_of_ten: int = int(np.floor(np.log10(np.abs(number))))
+
+    if abs(power_of_ten) <= 2:
+        n_decimals = int(-np.floor(np.log10(np.abs(err))))
+        latex_string: str = rf"${number:.{n_decimals}f} \pm {err:.{n_decimals}f}$"
+    else:
+        num_no_power: float = number / (10**power_of_ten)
+        err_no_power: float = err / (10**power_of_ten)
+        n_decimals = int(-np.floor(np.log10(np.abs(err_no_power))))
+        if n_decimals < 0:
+            n_decimals = 0
+        latex_string: str = (
+            rf"$({num_no_power:.{n_decimals}f} \pm {err_no_power:.{n_decimals}f})\times 10^{{{power_of_ten}}}$"
+        )
+    return latex_string
+
+
+def savefig(nb_name: str, fig_name: str, fig: Figure, tight=True, svg=False):
 
     SAVEFIG_DIR = os.path.join(FIGDIR, nb_name)
-    FIGPATH = os.path.join(SAVEFIG_DIR, f"{fig_name}.png")
+
+    if svg:
+        FIGPATH = os.path.join(SAVEFIG_DIR, f"{fig_name}.svg")
+    else:
+        FIGPATH = os.path.join(SAVEFIG_DIR, f"{fig_name}.png")
 
     if not os.path.exists(SAVEFIG_DIR):
         os.mkdir(SAVEFIG_DIR)
@@ -157,6 +194,7 @@ class FKFit:
         V_app: float,
         R: float,
         eta: float,
+        gamma: float,
         alpha_0: float,
     ) -> float:
         # func = (
@@ -169,13 +207,16 @@ class FKFit:
         #     + alpha_0
         #     - alpha
         # )
+
         func = (
             lambda alpha: FK_fit(
                 lam,
                 self.x,
                 self.T,
                 # Responsivity = eta * lam(mu m) / 1.24
-                V_app + power * eta / 1.24 * (lam / 1000) * R * (1 - np.exp(-alpha * self.L)),
+                V_app
+                + power * eta / 1.24 * (lam / 1000) * R
+                * (1 - np.exp(-(gamma * alpha + alpha_0) * self.L)),
             )
             - alpha
         )
@@ -184,8 +225,69 @@ class FKFit:
         else:
             alpha = fsolve(func, self.alphas[-1])[0]
         self.alphas.append(alpha)
-        P_out = power * np.exp(-self.L * (0.44 * alpha + alpha_0))
+        P_out = power * np.exp(-self.L * (gamma * alpha + alpha_0))
         return float(P_out)
+
+    def FK_fit_current(
+        self,
+        power: float,
+        lam: float,
+        V_app: float,
+        R: float,
+        eta: float,
+        gamma: float,
+        alpha_0: float,
+    ) -> float:
+        # func = (
+        #     lambda alpha: FK_fit(
+        #         lam,
+        #         self.x,
+        #         self.T,
+        #         V_app + power * eta * R * (1 - np.exp(-alpha * self.L)),
+        #     )
+        #     + alpha_0
+        #     - alpha
+        # )
+        # L_n = #2.5e-4 #0.01477
+        func = (
+            lambda alpha: FK_fit(
+                lam,
+                self.x,
+                self.T,
+                # Responsivity = eta * lam(mu m) / 1.24
+                V_app
+                + power * eta / 1.24 * (lam / 1000) * R * (1 - np.exp(-self.L * (gamma * alpha + alpha_0))),
+                # + power * eta / 1.24 * (lam / 1000) * R * (1 - np.exp(-self.L * (gamma * alpha + alpha_0)) / (1 + L_n * (gamma * alpha + alpha_0))),
+            )
+            - alpha
+        )
+        if len(self.alphas) == 0:
+            alpha = fsolve(func, 1000)[0]
+        else:
+            alpha = fsolve(func, self.alphas[-1])[0]
+        self.alphas.append(alpha)
+        current = (
+            power
+            * eta
+            / 1.24
+            * (lam / 1000)
+            * (1 - np.exp(-self.L * (gamma * alpha + alpha_0)))
+            # * (1 - np.exp(-self.L * (gamma * alpha + alpha_0)) / (1 + L_n * (gamma * alpha + alpha_0)))
+        )
+        return float(current)
+
+    def FK_fit_current_array(
+        self, power: np.ndarray, eta: float, gamma: float, alpha_0: float
+    ) -> float:
+        current = np.array(
+            [
+                self.FK_fit_current(
+                    pow1, self.lam, self.V_app, self.R, eta, gamma, alpha_0
+                )
+                for pow1 in power
+            ]
+        )
+        return current
 
     # def FK_fit_power_unscaled(
     #     self,
@@ -200,7 +302,7 @@ class FKFit:
     #     tau = 1e-6
     #     mu_n = 8500
     #     l = 1e-7 * np.sqrt(1e4 + 795.5 * (1.4 - V_d)) # depletion width in cm
-    #     # res = mu_n * V_app * tau / l**2 * eta * (lam / 1000) / 1.24 
+    #     # res = mu_n * V_app * tau / l**2 * eta * (lam / 1000) / 1.24
     #     res = eta * V_app * lam * 68548.4
     #     func = (
     #         lambda alpha: FK_fit(
@@ -221,13 +323,11 @@ class FKFit:
     #     return float(P_out)
 
     def FK_fit_power_scaled(
-        self, power: np.ndarray, eta: float, alpha_0: float, norm: float
+        self, power: np.ndarray, eta: float, norm: float
     ) -> np.ndarray:
         P_out = np.array(
             [
-                self.FK_fit_power_unscaled(
-                    pow1, self.lam, self.V_app, self.R, eta, alpha_0
-                )
+                self.FK_fit_power_unscaled(pow1, self.lam, self.V_app, self.R, eta, 0.44, 23.5)
                 for pow1 in power
             ]
         )
@@ -247,24 +347,24 @@ class FKFit:
         return P_out / np.max(P_out)
 
     def FK_fit_wavelength_scaled(
-        self, wavelength: np.ndarray, eta: float, alpha_0: float
+        self, wavelength: np.ndarray, eta: float, norm: float
     ) -> float:
         P_out = np.array(
             [
                 self.FK_fit_power_unscaled(
-                    self.P_in, wl, self.V_app, self.R, eta, alpha_0
+                    self.P_in, wl, self.V_app, self.R, eta, 0.44, 23.5
                 )
                 for wl in wavelength
             ]
         )
-        return P_out / np.max(P_out)
+        return norm * P_out
 
 
 @dataclass
 class FitInput:
     xdata: np.ndarray
     ydata: np.ndarray
-    yerror: np.ndarray
+    yerror: np.ndarray | None
     fit_func: Callable
     initial_guesses: list[float]
 
@@ -273,9 +373,9 @@ class FitInput:
 class FitResult:
     parameters: list[float]
     parameter_errors: list[float]
-    chi2: float
-    ndof: float
-    p_value: float
+    chi2: float | None
+    ndof: float | None
+    p_value: float | None
     success: bool
 
 
@@ -321,6 +421,54 @@ def perform_fit(
     parameter_errors = minuit_obj.errors[:]
 
     return FitResult(parameter_values, parameter_errors, chi2_val, ndof, p_val, success)
+
+
+# def perform_fit_llh(
+#     fit_input: FitInput,
+#     bounds: None | dict[str, tuple[float, float] | None] = None,
+#     outlier: int | list[int] | None = None,
+# ):
+#     if (
+#         len(fit_input.initial_guesses)
+#         != len(inspect.signature(fit_input.fit_func).parameters) - 1
+#     ):
+#         raise ValueError("Initial guesses must match # of fit function arguments.")
+#     if outlier:
+#         xdata = np.delete(fit_input.xdata, outlier)
+#         ydata = np.delete(fit_input.ydata, outlier)
+#         yerror = np.delete(fit_input.yerror, outlier)
+#     else:
+#         xdata = fit_input.xdata
+#         ydata = fit_input.ydata
+#         yerror = fit_input.yerror
+
+#     counts, bin_edges = [[xdata[idx]] * ]
+
+#     # binwidth = np.diff(xdata)[0]
+#     # bin_edges = np.array([n * binwidth for n in range(len(xdata ) + 1)])
+#     # bin_edges = (fit_input.xdata[:-1] + fit_input.xdata[1:])
+#     # bin_edges = np.append(bin_edges, bin_edges[-1] + np.mean(np.diff(bin_edges)))
+#     # bin_edges = np.append([0], bin_edges)
+#     # if softloss:
+#     #     lstsq = LeastSquares(xdata, ydata, yerror, fit_input.fit_func, loss="soft_l1")
+#     # else:
+#     #     lstsq = LeastSquares(xdata, ydata, yerror, fit_input.fit_func)
+#     llh = BinnedNLL(ydata, bin_edges, fit_input.fit_func, use_pdf="approximate")
+#     minuit_obj = Minuit(llh, *fit_input.initial_guesses)
+
+#     if bounds:
+#         for name, bound in bounds.items():
+#             minuit_obj.limits[name] = bound
+
+#     minuit_obj.migrad()
+#     minuit_obj.hesse()
+
+#     success = minuit_obj.accurate and minuit_obj.valid
+
+#     parameter_values = minuit_obj.values[:]
+#     parameter_errors = minuit_obj.errors[:]
+
+#     return FitResult(parameter_values, parameter_errors, None, None, None, success)
 
 
 def perform_fit_rounds(

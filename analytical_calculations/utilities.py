@@ -5,10 +5,14 @@ import os
 FIGDIR = os.path.join(os.path.dirname(__file__), "figures")
 
 
-def savefig(FNAME: str, fig_name: str, fig: Figure, tight=True):
+def savefig(FNAME: str, fig_name: str, fig: Figure, tight=True, svg=False):
 
     SAVEFIG_DIR = os.path.join(FIGDIR, FNAME)
-    FIGPATH = os.path.join(SAVEFIG_DIR, f"{fig_name}.png")
+
+    if svg:
+        FIGPATH = os.path.join(SAVEFIG_DIR, f"{fig_name}.svg")
+    else:
+        FIGPATH = os.path.join(SAVEFIG_DIR, f"{fig_name}.png")
 
     if not os.path.exists(SAVEFIG_DIR):
         os.mkdir(SAVEFIG_DIR)

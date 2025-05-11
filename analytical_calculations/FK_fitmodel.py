@@ -78,16 +78,18 @@ def FK_fit_power(
     alpha_0: float,
 ):
     alphas = []
-    for power in P_in:
+    for idx, power in enumerate(P_in):
         func = (
             lambda alpha: FK_fit(
-                lam, x, T, V_app + power * eta * R * (1 - np.exp(-alpha * L))
+                lam, x, T, V_app + power * eta / 1.24 * (lam / 1000) * R * (1 - np.exp(-alpha * L))
             )
             + alpha_0
             - alpha
         )
-        alpha = fsolve(func, 1000)[0]
-        # alpha = root_scalar(func, bracket=[0, 1e6], method='brentq').root
+        if idx == 0:
+            alpha = fsolve(func, 1000)[0]
+        else:
+            alpha = fsolve(func, alphas[-1])[0]
         alphas.append(alpha)
 
     alphas = np.array(alphas)
