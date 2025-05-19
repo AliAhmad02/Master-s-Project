@@ -43,7 +43,7 @@ ax.plot(
 )
 
 ax.set_xlabel(r"Reverse voltage [$\mathrm{V}$]", fontsize=10)
-ax.set_ylabel(r"$\alpha_{FK}$", fontsize=10)
+ax.set_ylabel(r"$\alpha_{FK} \ [\mathrm{cm^{-1}}]$", fontsize=10)
 ax.legend(frameon=False, fontsize=10)
 
 savefig(FNAME, "fk_absorption_voltages", fig, svg=True)
@@ -74,7 +74,7 @@ ax.plot(
 )
 
 ax.set_xlabel(r"Wavelength [$\mathrm{nm}$]", fontsize=10)
-ax.set_ylabel(r"$\alpha_{FK}$", fontsize=10)
+ax.set_ylabel(r"$\alpha_{FK} \ [\mathrm{cm^{-1}}]$", fontsize=10)
 ax.legend(frameon=False, fontsize=10)
 
 savefig(FNAME, "fk_absorption_wavelengths", fig, svg=True)
